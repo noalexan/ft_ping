@@ -1,8 +1,8 @@
-CFLAGS=-Wall -Wextra
+CFLAGS=-Wall -Wextra -Werror
 
 NAME=ft_ping
 
-SRC=main.c
+SRC=main.c ft_ping.c
 OBJ=$(SRC:.c=.o)
 
 .PHONY: all
