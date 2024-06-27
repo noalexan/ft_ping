@@ -7,6 +7,8 @@ extern struct s_options
 	bool verbose;
 } g_options;
 
+extern bool running;
+
 struct s_host
 {
 	char *host;

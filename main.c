@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include "ft_ping.h"
 
 struct s_options g_options;
 struct s_host *hosts = NULL;
+bool running = false;
 
 void help()
 {
@@ -71,7 +73,7 @@ static struct s_host *add_new_host()
 	return new;
 }
 
-void done()
+void cleanup()
 {
 	while (hosts->next != NULL)
 	{
@@ -86,6 +88,13 @@ void done()
 
 	free(hosts);
 	hosts = NULL;
+
+	printf("ciao\n");
+}
+
+void stop(int)
+{
+	running = false;
 }
 
 int main(int argc, char **argv)
@@ -179,13 +188,15 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	atexit(done);
+	atexit(cleanup);
+	signal(SIGINT, stop);
 
 	struct s_host *iter = hosts;
 
 	while (iter)
 	{
 		ft_ping(iter);
+		printf("done\n");
 		iter = iter->next;
 	}
 
