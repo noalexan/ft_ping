@@ -1,4 +1,9 @@
-CFLAGS=-Wall -Wextra -Werror
+ifeq ($(MAKE_BUILD_TYPE), Release)
+	CFLAGS=-Wall -Wextra -Werror -O2 -Os
+else
+	CFLAGS=-Wall -Wextra -g -fsanitize=memory
+	LDFLAGS=-fsanitize=memory
+endif
 
 NAME=ft_ping
 

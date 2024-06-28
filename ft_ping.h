@@ -2,12 +2,18 @@
 
 #include <stdbool.h>
 
-extern struct s_options
+struct s_options
 {
-	bool verbose;
-} g_options;
+	bool   verbose;
+	bool   debug;
+	size_t size;
+	size_t count;
+};
 
+extern struct s_options g_options;
 extern bool running;
+
+extern int socket_fd;
 
 struct s_host
 {

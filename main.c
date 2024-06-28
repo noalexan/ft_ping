@@ -1,12 +1,17 @@
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 #include "ft_ping.h"
 
 struct s_options g_options;
 struct s_host *hosts = NULL;
-bool running = false;
+bool running = true;
+int socket_fd;
 
 void help()
 {
@@ -51,7 +56,7 @@ static struct s_host *add_new_host()
 
 	if (new == NULL)
 	{
-		perror("calloc: ");
+		perror("ft_ping: calloc");
 		exit(EXIT_FAILURE);
 	}
 
@@ -89,17 +94,25 @@ void cleanup()
 	free(hosts);
 	hosts = NULL;
 
-	printf("ciao\n");
+	if (close(socket_fd) < 0)
+	{
+		perror("ft_ping: close");
+	}
 }
 
-void stop(int)
+void stop()
 {
 	running = false;
 }
 
 int main(int argc, char **argv)
 {
-	bzero(&g_options, sizeof(g_options));
+	g_options = (struct s_options) {
+		.verbose = false,
+		.debug   = false,
+		.size    = 56,
+		.count   = -1,
+	};
 
 	bool argument_parsing = true;
 	for (int i = 1; i < argc; i++)
@@ -123,6 +136,36 @@ int main(int argc, char **argv)
 					case 'V':
 						version();
 						break;
+
+					case 'd':
+						g_options.debug = true;
+						break;
+
+					case 's':
+					{
+						char *endptr, *strtptr = argv[i][j + 1] ? &argv[i][++j] : argv[++i];
+						g_options.size = strtoul(strtptr, &endptr, 10);
+						if (*endptr)
+						{
+							fprintf(stderr, "ft_ping: invalid value (`%s' near `%s')\n",
+								strtptr, endptr);
+							exit(EXIT_FAILURE);
+						}
+						break;
+					}
+
+					case 'c':
+					{
+						char *endptr, *strtptr = argv[i][j + 1] ? &argv[i][++j] : argv[++i];
+						g_options.count = strtoul(strtptr, &endptr, 10);
+						if (*endptr)
+						{
+							fprintf(stderr, "ft_ping: invalid value (`%s' near `%s')\n",
+								strtptr, endptr);
+							exit(EXIT_FAILURE);
+						}
+						break;
+					}
 
 					default:
 						fprintf(stderr,
@@ -161,6 +204,35 @@ int main(int argc, char **argv)
 					version();
 				}
 
+				else if (strcmp(argv[i], "--debug") == 0)
+				{
+					g_options.debug = true;
+				}
+
+				else if (strncmp(argv[i], "--size", 6) == 0 && (argv[i][6] == 0 || argv[i][6] == '='))
+				{
+					char *endptr;
+					g_options.size = strtoul(argv[i][6] == 0 ? argv[++i] : argv[i] + 7, &endptr, 10);
+					if (*endptr)
+					{
+						fprintf(stderr, "ft_ping: invalid value (`%s' near `%s')\n",
+							argv[i][6] == 0 ? argv[++i] : argv[i] + 7, endptr);
+						exit(EXIT_FAILURE);
+					}
+				}
+
+				else if (strncmp(argv[i], "--count", 7) == 0 && (argv[i][7] == 0 || argv[i][7] == '='))
+				{
+					char *endptr;
+					g_options.count = strtoul(argv[i][7] == 0 ? argv[++i] : argv[i] + 8, &endptr, 10);
+					if (*endptr)
+					{
+						fprintf(stderr, "ft_ping: invalid value (`%s' near `%s')\n",
+							argv[i][7] == 0 ? argv[++i] : argv[i] + 8, endptr);
+						exit(EXIT_FAILURE);
+					}
+				}
+
 				else
 				{
 					fprintf(stderr,
@@ -174,7 +246,6 @@ int main(int argc, char **argv)
 
 		else
 		{
-			printf("host: %s\n", argv[i]);
 			struct s_host *new = add_new_host();
 			new->host = argv[i];
 		}
@@ -191,12 +262,45 @@ int main(int argc, char **argv)
 	atexit(cleanup);
 	signal(SIGINT, stop);
 
+	struct protoent *proto;
+
+	proto = getprotobyname("icmp");
+	if (proto == NULL)
+	{
+		fprintf(stderr, "ft_ping: unknown protocol icmp.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	socket_fd = socket(AF_INET, SOCK_DGRAM, proto->p_proto);
+
+	if (socket_fd < 0)
+	{
+		perror("ft_ping: socket");
+		exit(EXIT_FAILURE);
+	}
+
+	struct timeval timeout;
+	timeout.tv_sec = 10;
+	timeout.tv_usec = 0;
+
+	int on = 1;
+
+	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) < 0
+		|| setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) < 0)
+	{
+		perror("ft_ping: setsockopt");
+	}
+
+	if (g_options.debug && setsockopt(socket_fd, SOL_SOCKET, SO_DEBUG, &on, sizeof on) < 0)
+	{
+		perror("ft_ping: setsockopt");
+	}
+
 	struct s_host *iter = hosts;
 
 	while (iter)
 	{
 		ft_ping(iter);
-		printf("done\n");
 		iter = iter->next;
 	}
 
