@@ -16,6 +16,10 @@ all: $(NAME)
 $(NAME): $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
+.PHONY: install
+install: all
+	install $(NAME) /usr/local/bin
+
 .PHONY: clean
 clean:
 	$(RM) $(OBJ)

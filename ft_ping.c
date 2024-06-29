@@ -72,7 +72,6 @@ void ft_ping(struct s_host *host)
 
 		icmp->checksum = compute_checksum((uint16_t *)buffer, packet_size);
 
-
 		gettimeofday(&start, NULL);
 
 		if (sendto(socket_fd, buffer, packet_size, 0, res->ai_addr, res->ai_addrlen) < 0)
@@ -89,7 +88,7 @@ void ft_ping(struct s_host *host)
 			exit(EXIT_FAILURE);
 		}
 
-		return_icmp = (struct icmphdr *) return_buffer;
+		return_icmp = (struct icmphdr *)return_buffer;
 
 		if (return_icmp->type != ICMP_ECHOREPLY || return_icmp->code != 0)
 			continue;
@@ -112,18 +111,17 @@ void ft_ping(struct s_host *host)
 	}
 
 	printf(
-		"--- %s ping statistics ---\n"
-		"%lu packets transmitted, %lu packets received, %i%% packet loss\n"
-		"round-trip min/avg/max/stddev = %.3f/%.3f/%.3f/%.3f ms\n",
-		host->host,
-		packet_sent,
-		packet_received,
-		100,
-		0,
-		total / packet_received,
-		0,
-		0
-	);
+			"--- %s ping statistics ---\n"
+			"%lu packets transmitted, %lu packets received, %i%% packet loss\n"
+			"round-trip min/avg/max/stddev = %.3f/%.3f/%.3f/%.3f ms\n",
+			host->host,
+			packet_sent,
+			packet_received,
+			100,
+			0,
+			total / packet_received,
+			0,
+			0);
 
 	free(buffer);
 	freeaddrinfo(res);
