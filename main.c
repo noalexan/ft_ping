@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <getopt.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
@@ -14,15 +15,23 @@ char *program_name;
 bool running = true;
 int socket_fd;
 
-void help()
+static void help()
 {
 	printf(
-			"Usage: %s [OPTION...] HOST ...\n"
+			"Usage: ft_ping [OPTION...] HOST ...\n"
 			"Send ICMP ECHO_REQUEST packets to network hosts.\n"
 			"\n"
 			" Options valid for all request types:\n"
 			"\n"
+			"  -c, --count=NUMBER         stop after sending NUMBER packets\n"
+			"  -d, --debug                set the SO_DEBUG option\n"
+			"      --ttl=N                specify N as time-to-live\n"
 			"  -v, --verbose              verbose output\n"
+			"  -w, --timeout=N            stop after N seconds\n"
+			"\n"
+			" Options valid for --echo requests:\n"
+			"\n"
+			"  -s, --size=NUMBER          send NUMBER data octets\n"
 			"\n"
 			"  -?, --help                 give this help list\n"
 			"      --usage                give a short usage message\n"
@@ -31,18 +40,22 @@ void help()
 			"Mandatory or optional arguments to long options are also mandatory or optional\n"
 			"for any corresponding short options.\n"
 			"\n"
-			"Report bugs to <noalexan@student.42nice.fr>.\n",
-			program_name);
+			"Report bugs to <noalexan@student.42nice.fr>.\n");
 	exit(EXIT_SUCCESS);
 }
 
-void usage()
+static void usage()
 {
-	printf("Usage: %s [-v?V] [--help] [--usage] [--version] HOST ...\n", program_name);
+	printf(
+			"Usage: ft_ping [-dv?V] [-c NUMBER] [-w N] [-s NUMBER]\n"
+			"            [--count=NUMBER] [--debug] [--ttl=N]\n"
+			"            [--verbose] [--timeout=N] [--size=NUMBER]\n"
+			"            [--help] [--usage] [--version]\n"
+			"            HOST ...\n");
 	exit(EXIT_SUCCESS);
 }
 
-void version()
+static void version()
 {
 	printf(
 			"ft_ping based on ping (GNU inetutils) 2.0\n"
@@ -82,19 +95,22 @@ static struct s_host *add_new_host()
 
 void cleanup()
 {
-	while (hosts->next != NULL)
+	if (hosts)
 	{
-		struct s_host *iter = hosts;
+		while (hosts->next != NULL)
+		{
+			struct s_host *iter = hosts;
 
-		while (iter->next && iter->next->next)
-			iter = iter->next;
+			while (iter->next && iter->next->next)
+				iter = iter->next;
 
-		free(iter->next);
-		iter->next = NULL;
+			free(iter->next);
+			iter->next = NULL;
+		}
+
+		free(hosts);
+		hosts = NULL;
 	}
-
-	free(hosts);
-	hosts = NULL;
 
 	if (close(socket_fd) < 0)
 	{
@@ -102,16 +118,31 @@ void cleanup()
 	}
 }
 
-void stop()
+static void stop()
 {
 	running = false;
 }
 
+static size_t take_arg()
+{
+	char *endptr;
+	size_t arg = strtoul(optarg, &endptr, 10);
+
+	if (*endptr)
+	{
+		fprintf(stderr, "%s: invalid value (`%s' near `%s')\n",
+						program_name, optarg, endptr);
+		exit(EXIT_FAILURE);
+	}
+
+	return arg;
+}
+
 int main(int argc, char **argv)
 {
-	program_name = *argv;
+	signal(SIGINT, stop);
 
-	if (program_name == NULL)
+	if ((program_name = *argv) == NULL)
 	{
 		fputs("A NULL argv[0] was passed through an exec system call.\n",
 					stderr);
@@ -120,193 +151,18 @@ int main(int argc, char **argv)
 
 	g_options = (struct s_options){
 			.verbose = false,
-			.debug   = false,
-			.size    = 56,
-			.count   = -1,
+			.debug = false,
+			.size = 56,
+			.count = -1,
+			.timeout = -1,
 	};
-
-	bool argument_parsing = true;
-	for (int i = 1; i < argc; i++)
-	{
-		if (argument_parsing && argv[i][0] == '-' && argv[i][1])
-		{
-			if (argv[i][1] != '-')
-			{
-				for (int j = 1; argv[i][j]; j++)
-				{
-					if (argv[i][j] == 'v')
-					{
-						g_options.verbose = true;
-					}
-
-					else if (argv[i][j] == '?')
-					{
-						help();
-					}
-
-					else if (argv[i][j] == 'V')
-					{
-						version();
-					}
-
-					else if (argv[i][j] == 'd')
-					{
-						g_options.debug = true;
-					}
-
-					else if (argv[i][j] == 's')
-					{
-						char *endptr, *strtptr = argv[i][j + 1] ? &argv[i][++j] : argv[++i];
-						if (strtptr == NULL)
-						{
-							fprintf(stderr,
-											"%s: option requires an argument -- 's'\n"
-											"Try 'ping --help' or 'ping --usage' for more information.\n",
-											program_name);
-							exit(EXIT_FAILURE);
-						}
-						g_options.size = strtoul(strtptr, &endptr, 10);
-						if (*endptr)
-						{
-							fprintf(stderr, "%s: invalid value (`%s' near `%s')\n",
-											program_name, strtptr, endptr);
-							exit(EXIT_FAILURE);
-						}
-						break;
-					}
-
-					else if (argv[i][j] == 'c')
-					{
-						char *endptr, *strtptr = argv[i][j + 1] ? &argv[i][++j] : argv[++i];
-						if (strtptr == NULL)
-						{
-							fprintf(stderr,
-											"%s: option requires an argument -- 'c'\n"
-											"Try 'ping --help' or 'ping --usage' for more information.\n",
-											program_name);
-							exit(EXIT_FAILURE);
-						}
-						g_options.count = strtoul(strtptr, &endptr, 10);
-						if (*endptr)
-						{
-							fprintf(stderr, "%s: invalid value (`%s' near `%s')\n",
-											program_name, strtptr, endptr);
-							exit(EXIT_FAILURE);
-						}
-						break;
-					}
-
-					else
-					{
-						fprintf(stderr,
-										"%s: invalid option -- '%c'\n"
-										"Try 'ft_ping --help' or 'ft_ping --usage' for more information.\n",
-										program_name, argv[i][j]);
-						exit(EXIT_FAILURE);
-					}
-				}
-			}
-
-			else
-			{
-				if (strcmp(argv[i], "--") == 0)
-				{
-					argument_parsing = false;
-				}
-
-				else if (strcmp(argv[i], "--verbose") == 0)
-				{
-					g_options.verbose = true;
-				}
-
-				else if (strcmp(argv[i], "--help") == 0)
-				{
-					help();
-				}
-
-				else if (strcmp(argv[i], "--usage") == 0)
-				{
-					usage();
-				}
-
-				else if (strcmp(argv[i], "--version") == 0)
-				{
-					version();
-				}
-
-				else if (strcmp(argv[i], "--debug") == 0)
-				{
-					g_options.debug = true;
-				}
-
-				else if (strncmp(argv[i], "--size", 6) == 0 && (argv[i][6] == 0 || argv[i][6] == '='))
-				{
-					char *endptr;
-					g_options.size = strtoul(argv[i][6] == 0 ? argv[++i] : argv[i] + 7, &endptr, 10);
-					if (*endptr)
-					{
-						fprintf(stderr, "%s: invalid value (`%s' near `%s')\n",
-										program_name, argv[i][6] == 0 ? argv[++i] : argv[i] + 7, endptr);
-						exit(EXIT_FAILURE);
-					}
-				}
-
-				else if (strncmp(argv[i], "--count", 7) == 0 && (argv[i][7] == 0 || argv[i][7] == '='))
-				{
-					char *endptr;
-					g_options.count = strtoul(argv[i][7] == 0 ? argv[++i] : argv[i] + 8, &endptr, 10);
-					if (*endptr)
-					{
-						fprintf(stderr, "%s: invalid value (`%s' near `%s')\n",
-										program_name, argv[i][7] == 0 ? argv[++i] : argv[i] + 8, endptr);
-						exit(EXIT_FAILURE);
-					}
-				}
-
-				else
-				{
-					fprintf(stderr,
-									"%s: unrecognized option '%s'\n"
-									"Try 'ft_ping --help' or 'ft_ping --usage' for more information.\n",
-									program_name, argv[i]);
-					exit(EXIT_FAILURE);
-				}
-			}
-		}
-
-		else
-		{
-			struct s_host *new = add_new_host();
-			new->host = argv[i];
-		}
-	}
-
-	if (hosts == NULL)
-	{
-		fprintf(stderr,
-						"%s: missing host operand\n"
-						"Try 'ft_ping --help' or 'ft_ping --usage' for more information.\n",
-						program_name);
-		exit(EXIT_FAILURE);
-	}
-
-	// printf(
-	// 		"size:  %lu\n"
-	// 		"count: %lu\n",
-	// 		g_options.size,
-	// 		g_options.count);
-
-	// exit(EXIT_SUCCESS);
-
-	atexit(cleanup);
-	signal(SIGINT, stop);
 
 	struct protoent *proto;
 
 	proto = getprotobyname("icmp");
 	if (proto == NULL)
 	{
-		fprintf(stderr, "%s: unknown protocol icmp.\n", program_name);
+		fprintf(stderr, "ft_ping: unknown protocol icmp.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -318,12 +174,88 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+	atexit(cleanup);
+
+	while (true)
+	{
+		static struct option long_options[] = {
+				{"count", required_argument, 0, 'c'},
+				{"debug", no_argument, 0, 'd'},
+				{"ttl", required_argument, 0, 't'},
+				{"verbose", no_argument, 0, 'v'},
+				{"timeout", required_argument, 0, 'w'},
+				{"size", required_argument, 0, 's'},
+				{"help", no_argument, 0, '?'},
+				{"usage", no_argument, 0, 'u'},
+				{"version", no_argument, 0, 'V'},
+				{0, 0, 0, 0},
+		};
+
+		int option_index;
+		int c = getopt_long(argc, argv, "c:dvw:s:?V", long_options, &option_index);
+
+		if (c == -1)
+			break;
+
+		switch (c)
+		{
+		case 'c':
+			g_options.count = take_arg();
+			break;
+
+		case 'd':
+			g_options.debug = true;
+			break;
+
+		case 'v':
+			g_options.verbose = true;
+			break;
+
+		case 'w':
+			g_options.timeout = take_arg();
+			break;
+
+		case 's':
+			g_options.size = take_arg();
+			break;
+
+		case 'u':
+			usage();
+
+		case 'V':
+			version();
+
+		default:
+			if (optopt == 0)
+				help();
+
+			fprintf(stderr, "Try 'ft_ping --help' or 'ft_ping --usage' for more information.\n");
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	while (optind < argc)
+	{
+		struct s_host *new = add_new_host();
+		new->host = argv[optind++];
+	}
+
+	if (hosts == NULL)
+	{
+		fprintf(stderr,
+						"ft_ping: missing host operand\n"
+						"Try 'ft_ping --help' or 'ft_ping --usage' for more information.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (g_options.count == 0)
+		g_options.count = -1;
+
 	struct timeval timeout;
-	timeout.tv_sec  = 10;
+	timeout.tv_sec = 10;
 	timeout.tv_usec = 0;
 
 	int on = 1;
-
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) < 0 || setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) < 0)
 	{
 		perror("ft_ping: setsockopt");

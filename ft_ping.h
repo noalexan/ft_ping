@@ -8,6 +8,7 @@ struct s_options
 	bool   debug;
 	size_t size;
 	size_t count;
+	size_t timeout;
 };
 
 extern struct s_options g_options;
