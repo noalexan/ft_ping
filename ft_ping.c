@@ -60,12 +60,13 @@ void ft_ping(struct s_host *host)
 	icmp->code = 0;
 
 	uint16_t sequence = 0;
-	size_t count = 0, len, packet_sent = 0, packet_received = 0;
+	size_t count = 0, packet_sent = 0, packet_received = 0;
+	ssize_t len;
 
 	struct timeval start, end;
-	float time, min, max, total = 0;
+	double time = 0, min = 0, max = 0, total = 0;
 
-	while (count++ < g_options.count && running)
+	while (running && count++ < g_options.count)
 	{
 		icmp->un.echo.sequence = sequence++;
 		icmp->un.echo.id = rand() % 0x10000;
@@ -88,6 +89,11 @@ void ft_ping(struct s_host *host)
 			exit(EXIT_FAILURE);
 		}
 
+		struct iphdr *return_ip = (struct iphdr *) return_buffer;
+		size_t hlen = return_ip->ihl << 2;
+
+		printf("hlen: %lu\n", hlen);
+
 		return_icmp = (struct icmphdr *)return_buffer;
 
 		if (return_icmp->type != ICMP_ECHOREPLY || return_icmp->code != 0)
@@ -100,13 +106,25 @@ void ft_ping(struct s_host *host)
 		time = (end.tv_sec - start.tv_sec) * 1000.0f + (end.tv_usec - start.tv_usec) / 1000.0f;
 		total += time;
 
-		printf("%li bytes from %s: icmp_seq=%i ttl=0 time=%.3f ms\n",
+		if (count == 1)
+		{
+			min = time;
+			max = time;
+		}
+
+		else if (time > max)
+			max = time;
+		else if (time < min)
+			min = time;
+
+		printf("%lu bytes from %s: icmp_seq=%u ttl=%d time=%.3f ms\n",
 					len,
 					inet_ntoa((struct in_addr)((struct sockaddr_in *)res->ai_addr)->sin_addr),
 					return_icmp->un.echo.sequence,
+					return_ip->ttl,
 					time);
 
-		if (count < g_options.count && running)
+		if (running && count < g_options.count)
 			usleep(1000000);
 	}
 
@@ -118,10 +136,10 @@ void ft_ping(struct s_host *host)
 			packet_sent,
 			packet_received,
 			100,
-			0,
+			min,
 			total / packet_received,
-			0,
-			0);
+			max,
+			0.0);
 
 	free(buffer);
 	freeaddrinfo(res);
