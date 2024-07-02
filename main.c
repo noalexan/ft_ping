@@ -7,13 +7,20 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <errno.h>
+#include <limits.h>
 #include "ft_ping.h"
 
 struct s_options g_options;
-struct s_host *hosts = NULL;
 char *program_name;
 bool running = true;
 int socket_fd;
+
+enum
+{
+	ARG_TTL,
+	ARG_USAGE,
+};
 
 static void help()
 {
@@ -64,54 +71,8 @@ static void version()
 	exit(EXIT_SUCCESS);
 }
 
-static struct s_host *add_new_host()
-{
-	struct s_host *new = calloc(1, sizeof(struct s_host));
-	struct s_host *iter = hosts;
-
-	if (new == NULL)
-	{
-		perror("ft_ping: calloc");
-		exit(EXIT_FAILURE);
-	}
-
-	if (hosts == NULL)
-	{
-		hosts = new;
-	}
-
-	else
-	{
-		while (iter->next)
-		{
-			iter = iter->next;
-		}
-
-		iter->next = new;
-	}
-
-	return new;
-}
-
 void cleanup()
 {
-	if (hosts)
-	{
-		while (hosts->next != NULL)
-		{
-			struct s_host *iter = hosts;
-
-			while (iter->next && iter->next->next)
-				iter = iter->next;
-
-			free(iter->next);
-			iter->next = NULL;
-		}
-
-		free(hosts);
-		hosts = NULL;
-	}
-
 	if (close(socket_fd) < 0)
 	{
 		perror("ft_ping: close");
@@ -123,7 +84,7 @@ static void stop()
 	running = false;
 }
 
-static size_t take_arg()
+static size_t take_arg(size_t maxval, int allow_zero)
 {
 	char *endptr;
 	size_t arg = strtoul(optarg, &endptr, 10);
@@ -132,6 +93,18 @@ static size_t take_arg()
 	{
 		fprintf(stderr, "%s: invalid value (`%s' near `%s')\n",
 						program_name, optarg, endptr);
+		exit(EXIT_FAILURE);
+	}
+
+	if (arg == 0 && !allow_zero)
+	{
+		fprintf(stderr, "%s: option value too small: %s\n", program_name, optarg);
+		exit(EXIT_FAILURE);
+	}
+
+	if (maxval && arg > maxval)
+	{
+		fprintf(stderr, "%s: option value too big: %s\n", program_name, optarg);
 		exit(EXIT_FAILURE);
 	}
 
@@ -150,11 +123,11 @@ int main(int argc, char **argv)
 	}
 
 	g_options = (struct s_options){
-			.verbose = false,
-			.debug = false,
-			.size = 56,
 			.count = -1,
+			.ttl = 0,
+			.verbose = false,
 			.timeout = -1,
+			.size = 56,
 	};
 
 	struct protoent *proto;
@@ -166,27 +139,37 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	socket_fd = socket(AF_INET, SOCK_DGRAM, proto->p_proto);
-
+	socket_fd = socket(AF_INET, SOCK_RAW, proto->p_proto);
 	if (socket_fd < 0)
 	{
-		perror("ft_ping: socket");
-		exit(EXIT_FAILURE);
+		if (errno == EPERM || errno == EACCES)
+		{
+			errno = 0;
+			socket_fd = socket(AF_INET, SOCK_DGRAM, proto->p_proto);
+			if (socket_fd < 0)
+			{
+				if (errno == EPERM || errno == EACCES || errno == EPROTONOSUPPORT)
+					fprintf(stderr, "ping: Lacking privilege for icmp socket.\n");
+				else
+					fprintf(stderr, "ping: %s\n", strerror(errno));
+			}
+		}
 	}
 
 	atexit(cleanup);
 
+	int socket_type = 0;
 	while (true)
 	{
 		static struct option long_options[] = {
 				{"count", required_argument, 0, 'c'},
 				{"debug", no_argument, 0, 'd'},
-				{"ttl", required_argument, 0, 't'},
+				{"ttl", required_argument, 0, ARG_TTL},
 				{"verbose", no_argument, 0, 'v'},
 				{"timeout", required_argument, 0, 'w'},
 				{"size", required_argument, 0, 's'},
 				{"help", no_argument, 0, '?'},
-				{"usage", no_argument, 0, 'u'},
+				{"usage", no_argument, 0, ARG_USAGE},
 				{"version", no_argument, 0, 'V'},
 				{0, 0, 0, 0},
 		};
@@ -200,11 +183,15 @@ int main(int argc, char **argv)
 		switch (c)
 		{
 		case 'c':
-			g_options.count = take_arg();
+			g_options.count = take_arg(0, true);
 			break;
 
 		case 'd':
-			g_options.debug = true;
+			socket_type |= SO_DEBUG;
+			break;
+
+		case ARG_TTL:
+			g_options.ttl = take_arg(255, false);
 			break;
 
 		case 'v':
@@ -212,14 +199,14 @@ int main(int argc, char **argv)
 			break;
 
 		case 'w':
-			g_options.timeout = take_arg();
+			g_options.timeout = take_arg(INT_MAX, 0);
 			break;
 
 		case 's':
-			g_options.size = take_arg();
+			g_options.size = take_arg(PING_MAX_DATALEN, true);
 			break;
 
-		case 'u':
+		case ARG_USAGE:
 			usage();
 
 		case 'V':
@@ -234,13 +221,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	while (optind < argc)
-	{
-		struct s_host *new = add_new_host();
-		new->host = argv[optind++];
-	}
-
-	if (hosts == NULL)
+	if (optind >= argc)
 	{
 		fprintf(stderr,
 						"ft_ping: missing host operand\n"
@@ -255,23 +236,26 @@ int main(int argc, char **argv)
 	timeout.tv_sec = 10;
 	timeout.tv_usec = 0;
 
-	int on = 1;
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) < 0 || setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) < 0)
 	{
 		perror("ft_ping: setsockopt");
 	}
 
-	if (g_options.debug && setsockopt(socket_fd, SOL_SOCKET, SO_DEBUG, &on, sizeof on) < 0)
+	if (socket_type != 0 &&
+			setsockopt(socket_fd, SOL_SOCKET, SO_DEBUG, &socket_type, sizeof socket_type) < 0)
 	{
 		perror("ft_ping: setsockopt");
 	}
 
-	struct s_host *iter = hosts;
-
-	while (iter)
+	if (g_options.ttl > 0 &&
+			setsockopt(socket_fd, IPPROTO_IP, IP_TTL, &g_options.ttl, sizeof g_options.ttl) < 0)
 	{
-		ft_ping(iter);
-		iter = iter->next;
+		perror("ft_ping: setsockopt");
+	}
+
+	while (optind < argc)
+	{
+		ft_ping(argv[optind++]);
 	}
 
 	return 0;

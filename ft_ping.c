@@ -26,7 +26,7 @@ static uint16_t compute_checksum(uint16_t *buffer, size_t len)
 	return ~((uint16_t)sum);
 }
 
-void ft_ping(struct s_host *host)
+void ft_ping(const char *host)
 {
 	struct addrinfo hints, *res;
 	bzero(&hints, sizeof(hints));
@@ -35,7 +35,7 @@ void ft_ping(struct s_host *host)
 	hints.ai_socktype = SOCK_RAW;
 	hints.ai_protocol = IPPROTO_ICMP;
 
-	int status = getaddrinfo(host->host, NULL, &hints, &res);
+	int status = getaddrinfo(host, NULL, &hints, &res);
 
 	if (status != 0)
 	{
@@ -43,7 +43,7 @@ void ft_ping(struct s_host *host)
 		exit(EXIT_FAILURE);
 	}
 
-	printf("PING %s (%s): %lu data bytes\n", host->host, inet_ntoa((struct in_addr)((struct sockaddr_in *)res->ai_addr)->sin_addr), g_options.size);
+	printf("PING %s (%s): %lu data bytes\n", host, inet_ntoa((struct in_addr)((struct sockaddr_in *)res->ai_addr)->sin_addr), g_options.size);
 
 	size_t packet_size = g_options.size + sizeof(struct icmphdr);
 	uint8_t *buffer = malloc(packet_size), return_buffer[0x10000];
@@ -51,7 +51,7 @@ void ft_ping(struct s_host *host)
 
 	for (size_t i = 8; i < packet_size; i++)
 	{
-		buffer[i] = rand() % 0x100;
+		buffer[i] = rand();
 	}
 
 	bzero(icmp, sizeof(struct icmphdr));
@@ -68,8 +68,8 @@ void ft_ping(struct s_host *host)
 
 	while (running && count++ < g_options.count)
 	{
-		icmp->un.echo.sequence = sequence++;
-		icmp->un.echo.id = rand() % 0x10000;
+		icmp->un.echo.sequence = htons(sequence++);
+		icmp->un.echo.id = htons(rand());
 
 		icmp->checksum = compute_checksum((uint16_t *)buffer, packet_size);
 
@@ -92,9 +92,7 @@ void ft_ping(struct s_host *host)
 		struct iphdr *return_ip = (struct iphdr *) return_buffer;
 		size_t hlen = return_ip->ihl << 2;
 
-		printf("hlen: %lu\n", hlen);
-
-		return_icmp = (struct icmphdr *)return_buffer;
+		return_icmp = (struct icmphdr *)(return_buffer + hlen);
 
 		if (return_icmp->type != ICMP_ECHOREPLY || return_icmp->code != 0)
 			continue;
@@ -118,9 +116,9 @@ void ft_ping(struct s_host *host)
 			min = time;
 
 		printf("%lu bytes from %s: icmp_seq=%u ttl=%d time=%.3f ms\n",
-					len,
+					len - hlen,
 					inet_ntoa((struct in_addr)((struct sockaddr_in *)res->ai_addr)->sin_addr),
-					return_icmp->un.echo.sequence,
+					ntohs(return_icmp->un.echo.sequence),
 					return_ip->ttl,
 					time);
 
@@ -130,12 +128,12 @@ void ft_ping(struct s_host *host)
 
 	printf(
 			"--- %s ping statistics ---\n"
-			"%lu packets transmitted, %lu packets received, %i%% packet loss\n"
+			"%lu packets transmitted, %lu packets received, %lu%% packet loss\n"
 			"round-trip min/avg/max/stddev = %.3f/%.3f/%.3f/%.3f ms\n",
-			host->host,
+			host,
 			packet_sent,
 			packet_received,
-			100,
+			(packet_sent - packet_received) * 100 / packet_sent,
 			min,
 			total / packet_received,
 			max,
