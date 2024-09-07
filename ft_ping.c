@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include <errno.h>
 #include <math.h>
+#include <limits.h>
 #include "ft_ping.h"
 
 static uint16_t compute_checksum(uint16_t *buffer, size_t len)
@@ -28,10 +29,10 @@ static uint16_t compute_checksum(uint16_t *buffer, size_t len)
 	return ~((uint16_t)sum);
 }
 
-struct addrinfo *dns_resolve(const char *hostname)
+static struct addrinfo *dns_resolve(const char *hostname)
 {
 	struct addrinfo hints, *host;
-	bzero(&hints, sizeof(hints));
+	bzero(&hints, sizeof hints);
 
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_RAW;
@@ -86,163 +87,171 @@ static void send_ping(struct addrinfo *host, void *buffer, size_t packet_size)
 	}
 }
 
-static ssize_t receive_ping(struct addrinfo *host, void *const buffer)
-{
-	ssize_t len;
-
-	do
-	{
-		if ((len = recvfrom(socket_fd, buffer, 0x10000, 0, host->ai_addr, &host->ai_addrlen)) < 0)
-		{
-			fprintf(stderr, "%zd bytes from %s: %s\n",
-					len,
-					inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr),
-					strerror(errno));
-			break;
-		}
-
-		printf("received packet with length %lu.\n", len);
-
-		struct iphdr *return_ip = (struct iphdr *)buffer;
-		size_t hlen = return_ip->ihl << 2;
-
-		if (return_ip->protocol != 0x01)
-		{
-			printf("not an icmp packet.\n");
-			continue;
-		}
-
-		struct icmphdr *return_icmp = (struct icmphdr *)(buffer + hlen);
-
-		switch (return_icmp->type)
-		{
-		case ICMP_ECHOREPLY:
-			printf("type: ICMP_ECHOREPLY\n");
-			return len;
-
-		case ICMP_ECHO:
-			printf("type: ICMP_ECHO\n");
-			break;
-
-		case ICMP_TIME_EXCEEDED:
-			printf("type: ICMP_TIME_EXCEEDED\n");
-			switch (return_icmp->code)
-			{
-			case ICMP_EXC_TTL:
-				fprintf(stderr, "%zu bytes from %s: Time to live exceeded\n",
-						len - hlen,
-						inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr));
-				break;
-
-			default:
-				fprintf(stderr, "unknown code (%d) for ICMP_TIME_EXCEEDED\n", return_icmp->code);
-				break;
-			}
-			break;
-
-		default:
-			fprintf(stderr, "unknown type (%d)\n", return_icmp->type);
-			continue;
-		}
-	} while (true);
-
-	return -1;
-}
-
 void ft_ping(const char *hostname)
 {
 	struct addrinfo *host = dns_resolve(hostname);
 
 	size_t packet_size = g_options.size + sizeof(struct icmphdr);
 
-	void *buffer = create_buffer(packet_size);
-	void *return_buffer = malloc(0x10000);
+	void *send_buffer = create_buffer(packet_size);
+	void *recv_buffer = malloc(0x10000);
 
-	struct iphdr *return_ip = (struct iphdr *)return_buffer;
-	struct icmphdr *icmp = (struct icmphdr *)buffer, *return_icmp = (struct icmphdr *)return_buffer;
+	struct iphdr *recv_ip = (struct iphdr *)recv_buffer;
+	struct icmphdr *send_icmp = (struct icmphdr *)send_buffer, *recv_icmp = (struct icmphdr *)recv_buffer;
 
-	size_t count = 0, packet_sent = 0, packet_received = 0;
-	struct timeval start, end;
-	double time = 0, min = 0, max = 0, total = 0;
+	size_t sent_packet = 0, received_packet = 0;
+	struct timeval now, interval = {.tv_sec = 3, .tv_usec = 0}, response_timeout, last;
+	double time = 0, min = INT_MAX, max = INT_MIN, total = 0;
 
-	if (buffer == NULL)
+	fd_set fdset;
+
+	if (send_buffer == NULL)
 	{
+		perror("ft_ping: malloc:");
+		exit(EXIT_FAILURE);
+	}
+
+	else if (recv_buffer == NULL)
+	{
+		free(send_buffer);
 		perror("ft_ping: malloc:");
 		exit(EXIT_FAILURE);
 	}
 
 	printf("PING %s (%s): %zu data bytes", hostname, inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr), g_options.size);
 	if (g_options.verbose)
-		printf(", id 0x%x = %i", ntohs(icmp->un.echo.id), ntohs(icmp->un.echo.id));
+		printf(", id 0x%x = %i", ntohs(send_icmp->un.echo.id), ntohs(send_icmp->un.echo.id));
 	printf("\n");
 
-	while (running && count++ < g_options.count)
+	gettimeofday(&last, NULL);
+	send_ping(host, send_buffer, packet_size);
+
+	while (running)
 	{
+		FD_ZERO(&fdset);
+		FD_SET(socket_fd, &fdset);
+		gettimeofday(&now, NULL);
 
-		/* Sending */
+		response_timeout = interval;
 
-		send_ping(host, buffer, packet_size);
-		packet_sent++;
+		int n = select(socket_fd + 1, &fdset, NULL, NULL, &response_timeout);
 
-		/* Receiving */
-
-		gettimeofday(&start, NULL);
-		ssize_t len = receive_ping(host, return_buffer);
-		gettimeofday(&end, NULL);
-
-		time = (end.tv_sec - start.tv_sec) * 1000.0f + (end.tv_usec - start.tv_usec) / 1000.0f;
-
-		return_ip = (struct iphdr *)return_buffer;
-		size_t hlen = return_ip->ihl << 2;
-		return_icmp = (struct icmphdr *)(return_buffer + hlen);
-
-		total += time;
-
-		if (count == 1)
+		if (n < 0)
 		{
-			min = time;
-			max = time;
+			if (errno != EINTR)
+			{
+				perror("ft_ping: select:");
+				exit(EXIT_FAILURE);
+			}
+			continue;
 		}
 
-		max = fmax(max, time);
-		min = fmin(min, time);
-
-		if (icmp->un.echo.sequence == return_icmp->un.echo.sequence)
-			packet_received++;
-
-		if (compute_checksum((uint16_t *)return_buffer, len) != 0)
+		else if (n == 1)
 		{
-			fprintf(stderr, "checksum mismatch from %s\n",
-					inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr));
+			ssize_t len;
+
+			if ((len = recvfrom(socket_fd, recv_buffer, 0x10000, 0, host->ai_addr, &host->ai_addrlen)) < 0)
+			{
+				fprintf(stderr, "%zd bytes from %s: %s\n",
+						len,
+						inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr),
+						strerror(errno));
+				continue;
+			}
+
+			recv_ip = (struct iphdr *)recv_buffer;
+			size_t hlen = recv_ip->ihl << 2;
+
+			recv_icmp = (struct icmphdr *)(recv_buffer + hlen);
+
+			switch (recv_icmp->type)
+			{
+			case ICMP_ECHOREPLY:
+				break;
+
+			case ICMP_ECHO:
+				continue;
+
+			case ICMP_TIME_EXCEEDED:
+				switch (recv_icmp->code)
+				{
+				case ICMP_EXC_TTL:
+					fprintf(stderr, "%zu bytes from %s: Time to live exceeded\n",
+							len - hlen,
+							inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr));
+					continue;
+
+				default:
+					fprintf(stderr, "unknown code (%d) for ICMP_TIME_EXCEEDED\n", recv_icmp->code);
+					continue;
+				}
+				continue;
+
+			default:
+				fprintf(stderr, "unknown type (%d)\n", recv_icmp->type);
+				continue;
+			}
+
+			if (compute_checksum((uint16_t *)recv_buffer, len) != 0)
+			{
+				fprintf(stderr, "checksum mismatch from %s\n",
+						inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr));
+			}
+
+			received_packet++;
+
+			gettimeofday(&last, NULL);
+
+			time = (last.tv_sec - now.tv_sec) * 1000.0f + (last.tv_usec - now.tv_usec) / 1000.0f;
+
+			total += time;
+
+			max = fmax(max, time);
+			min = fmin(min, time);
+
+			printf("%zu bytes from %s: icmp_seq=%u ttl=%d time=%.3f ms\n",
+				   len - hlen,
+				   inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr),
+				   ntohs(recv_icmp->un.echo.sequence),
+				   recv_ip->ttl,
+				   time);
 		}
 
-		printf("%zu bytes from %s: icmp_seq=%u ttl=%d time=%.3f ms\n",
-			   len - hlen,
-			   inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr),
-			   ntohs(return_icmp->un.echo.sequence),
-			   return_ip->ttl,
-			   time);
+		else
+		{
+			if (!g_options.count || sent_packet < g_options.count)
+			{
+				send_ping(host, send_buffer, packet_size);
+				sent_packet++;
+			}
 
-		/* Waiting */
+			else {
+				running = false;
+			}
 
-		if (running && count < g_options.count)
-			usleep(1000000);
+			gettimeofday(&last, NULL);
+		}
 	}
 
-	printf(
-		"--- %s ping statistics ---\n"
-		"%zu packets transmitted, %zu packets received, %zu%% packet loss\n"
-		"round-trip min/avg/max/stddev = %.3f/%.3f/%.3f/%.3f ms\n",
-		hostname,
-		packet_sent,
-		packet_received,
-		(packet_sent - packet_received) * 100 / packet_sent,
-		min,
-		total / packet_received,
-		max,
-		0.0);
+	fflush(stdout);
+	printf("--- %s ping statistics ---\n", hostname);
+	printf("%zu packets transmitted, %zu packets received", sent_packet, received_packet);
+	// if (ping->ping_num_rept)
+	// 	printf(", +%zu duplicates", ping->ping_num_rept);
 
-	free(buffer);
-	free(return_buffer);
+	if (sent_packet)
+	{
+		if (received_packet > sent_packet)
+			printf(", -- somebody is printing forged packets!");
+		else
+			printf(", %d%% packet loss",
+				   (int)(((sent_packet - received_packet) * 100) /
+						 sent_packet));
+	}
+
+	printf("\n");
+
+	free(send_buffer);
+	free(recv_buffer);
 	freeaddrinfo(host);
 }
