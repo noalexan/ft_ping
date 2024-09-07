@@ -73,8 +73,7 @@ static void version()
 
 void cleanup()
 {
-	if (close(socket_fd) < 0)
-	{
+	if (close(socket_fd) < 0) {
 		perror("ft_ping: close");
 	}
 }
@@ -89,21 +88,18 @@ static size_t take_arg(size_t maxval, int allow_zero)
 	char *endptr;
 	size_t arg = strtoul(optarg, &endptr, 10);
 
-	if (*endptr)
-	{
+	if (*endptr) {
 		fprintf(stderr, "%s: invalid value (`%s' near `%s')\n",
 						program_name, optarg, endptr);
 		exit(EXIT_FAILURE);
 	}
 
-	if (arg == 0 && !allow_zero)
-	{
+	if (arg == 0 && !allow_zero) {
 		fprintf(stderr, "%s: option value too small: %s\n", program_name, optarg);
 		exit(EXIT_FAILURE);
 	}
 
-	if (maxval && arg > maxval)
-	{
+	if (maxval && arg > maxval) {
 		fprintf(stderr, "%s: option value too big: %s\n", program_name, optarg);
 		exit(EXIT_FAILURE);
 	}
@@ -115,14 +111,13 @@ int main(int argc, char **argv)
 {
 	signal(SIGINT, stop);
 
-	if ((program_name = *argv) == NULL)
-	{
+	if ((program_name = *argv) == NULL) {
 		fputs("A NULL argv[0] was passed through an exec system call.\n",
 					stderr);
 		abort();
 	}
 
-	g_options = (struct s_options){
+	g_options = (struct s_options) {
 			.count = -1,
 			.ttl = 0,
 			.verbose = false,
@@ -133,21 +128,17 @@ int main(int argc, char **argv)
 	struct protoent *proto;
 
 	proto = getprotobyname("icmp");
-	if (proto == NULL)
-	{
+	if (proto == NULL) {
 		fprintf(stderr, "ft_ping: unknown protocol icmp.\n");
 		exit(EXIT_FAILURE);
 	}
 
 	socket_fd = socket(AF_INET, SOCK_RAW, proto->p_proto);
-	if (socket_fd < 0)
-	{
-		if (errno == EPERM || errno == EACCES)
-		{
+	if (socket_fd < 0) {
+		if (errno == EPERM || errno == EACCES) {
 			errno = 0;
 			socket_fd = socket(AF_INET, SOCK_DGRAM, proto->p_proto);
-			if (socket_fd < 0)
-			{
+			if (socket_fd < 0) {
 				if (errno == EPERM || errno == EACCES || errno == EPROTONOSUPPORT)
 					fprintf(stderr, "ping: Lacking privilege for icmp socket.\n");
 				else
@@ -180,8 +171,7 @@ int main(int argc, char **argv)
 		if (c == -1)
 			break;
 
-		switch (c)
-		{
+		switch (c) {
 		case 'c':
 			g_options.count = take_arg(0, true);
 			break;
@@ -208,9 +198,11 @@ int main(int argc, char **argv)
 
 		case ARG_USAGE:
 			usage();
+			break;
 
 		case 'V':
 			version();
+			break;
 
 		default:
 			if (optopt == 0)
@@ -221,8 +213,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (optind >= argc)
-	{
+	if (optind >= argc) {
 		fprintf(stderr,
 						"ft_ping: missing host operand\n"
 						"Try 'ft_ping --help' or 'ft_ping --usage' for more information.\n");
@@ -233,30 +224,24 @@ int main(int argc, char **argv)
 		g_options.count = -1;
 
 	struct timeval timeout;
-	timeout.tv_sec = 10;
+	timeout.tv_sec = 1;
 	timeout.tv_usec = 0;
 
-	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) < 0 || setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) < 0)
-	{
+	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) < 0
+		|| setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) < 0)
 		perror("ft_ping: setsockopt");
-	}
 
+	int on = 1;
 	if (socket_type != 0 &&
-			setsockopt(socket_fd, SOL_SOCKET, SO_DEBUG, &socket_type, sizeof socket_type) < 0)
-	{
+			setsockopt(socket_fd, SOL_SOCKET, socket_type, &on, sizeof on) < 0)
 		perror("ft_ping: setsockopt");
-	}
 
 	if (g_options.ttl > 0 &&
 			setsockopt(socket_fd, IPPROTO_IP, IP_TTL, &g_options.ttl, sizeof g_options.ttl) < 0)
-	{
 		perror("ft_ping: setsockopt");
-	}
 
 	while (optind < argc)
-	{
 		ft_ping(argv[optind++]);
-	}
 
 	return 0;
 }

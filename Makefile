@@ -1,9 +1,10 @@
 ifeq ($(MAKE_BUILD_TYPE), Release)
-	CFLAGS=-Wall -Wextra -Werror -O2 -Os
+	CFLAGS=-Wall -Wextra -Werror -O3 -Os
 else
-	CFLAGS=-Wall -Wextra -g -fsanitize=memory
-	LDFLAGS=-fsanitize=memory
+	CFLAGS=-Wall -Wextra -g
 endif
+
+LDFLAGS=-lm
 
 NAME=ft_ping
 
@@ -16,17 +17,13 @@ all: $(NAME)
 $(NAME): $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
-.PHONY: install
-install: all
-	install $(NAME) /usr/local/bin
-
 .PHONY: clean
 clean:
 	$(RM) $(OBJ)
 
 .PHONY: fclean
-fclean:
-	$(RM) $(NAME) $(OBJ)
+fclean: clean
+	$(RM) $(NAME)
 
 .PHONY: re
 re: fclean all
