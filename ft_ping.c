@@ -42,7 +42,7 @@ static struct addrinfo *dns_resolve(const char *hostname)
 
 	if (status != 0)
 	{
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
+		fprintf(stderr, "getaddrinfo: %s (%i)\n", gai_strerror(status), status);
 		exit(EXIT_FAILURE);
 	}
 
@@ -82,7 +82,7 @@ static void send_ping(struct addrinfo *host, void *buffer, size_t packet_size)
 
 	if (sendto(socket_fd, buffer, packet_size, 0, host->ai_addr, host->ai_addrlen) < 0)
 	{
-		perror("ft_ping: sendto");
+		perror("ft_ping: sending packet");
 		exit(EXIT_FAILURE);
 	}
 }
@@ -100,21 +100,21 @@ void ft_ping(const char *hostname)
 	struct icmphdr *send_icmp = (struct icmphdr *)send_buffer, *recv_icmp = (struct icmphdr *)recv_buffer;
 
 	size_t sent_packet = 0, received_packet = 0;
-	struct timeval now, interval = {.tv_sec = 3, .tv_usec = 0}, response_timeout, last;
+	struct timeval now, interval = {.tv_sec = 1, .tv_usec = 0}, response_timeout, last;
 	double time = 0, min = INT_MAX, max = INT_MIN, total = 0;
 
 	fd_set fdset;
 
 	if (send_buffer == NULL)
 	{
-		perror("ft_ping: malloc:");
+		perror("ft_ping: malloc");
 		exit(EXIT_FAILURE);
 	}
 
 	else if (recv_buffer == NULL)
 	{
 		free(send_buffer);
-		perror("ft_ping: malloc:");
+		perror("ft_ping: malloc");
 		exit(EXIT_FAILURE);
 	}
 
@@ -125,8 +125,9 @@ void ft_ping(const char *hostname)
 
 	gettimeofday(&last, NULL);
 	send_ping(host, send_buffer, packet_size);
+	sent_packet++;
 
-	while (running)
+	while (!stop)
 	{
 		FD_ZERO(&fdset);
 		FD_SET(socket_fd, &fdset);
@@ -140,7 +141,7 @@ void ft_ping(const char *hostname)
 		{
 			if (errno != EINTR)
 			{
-				perror("ft_ping: select:");
+				perror("ft_ping: select");
 				exit(EXIT_FAILURE);
 			}
 			continue;
@@ -153,9 +154,9 @@ void ft_ping(const char *hostname)
 			if ((len = recvfrom(socket_fd, recv_buffer, 0x10000, 0, host->ai_addr, &host->ai_addrlen)) < 0)
 			{
 				fprintf(stderr, "%zd bytes from %s: %s\n",
-						len,
-						inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr),
-						strerror(errno));
+					len,
+					inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr),
+					strerror(errno));
 				continue;
 			}
 
@@ -170,6 +171,7 @@ void ft_ping(const char *hostname)
 				break;
 
 			case ICMP_ECHO:
+				printf("echo received\n");
 				continue;
 
 			case ICMP_TIME_EXCEEDED:
@@ -177,8 +179,8 @@ void ft_ping(const char *hostname)
 				{
 				case ICMP_EXC_TTL:
 					fprintf(stderr, "%zu bytes from %s: Time to live exceeded\n",
-							len - hlen,
-							inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr));
+						len - hlen,
+						inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr));
 					continue;
 
 				default:
@@ -193,10 +195,8 @@ void ft_ping(const char *hostname)
 			}
 
 			if (compute_checksum((uint16_t *)recv_buffer, len) != 0)
-			{
 				fprintf(stderr, "checksum mismatch from %s\n",
-						inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr));
-			}
+					inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr));
 
 			received_packet++;
 
@@ -210,11 +210,11 @@ void ft_ping(const char *hostname)
 			min = fmin(min, time);
 
 			printf("%zu bytes from %s: icmp_seq=%u ttl=%d time=%.3f ms\n",
-				   len - hlen,
-				   inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr),
-				   ntohs(recv_icmp->un.echo.sequence),
-				   recv_ip->ttl,
-				   time);
+				len - hlen,
+				inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr),
+				ntohs(recv_icmp->un.echo.sequence),
+				recv_ip->ttl,
+				time);
 		}
 
 		else
@@ -223,11 +223,11 @@ void ft_ping(const char *hostname)
 			{
 				send_ping(host, send_buffer, packet_size);
 				sent_packet++;
+				printf("packet sent\n");
 			}
 
-			else {
-				running = false;
-			}
+			else
+				break;
 
 			gettimeofday(&last, NULL);
 		}

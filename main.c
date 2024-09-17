@@ -13,7 +13,7 @@
 
 struct s_options g_options;
 char *program_name;
-bool running = true;
+bool stop = false;
 int socket_fd;
 
 enum
@@ -79,9 +79,9 @@ void cleanup()
 	}
 }
 
-static void stop()
+static void sigint_handler()
 {
-	running = false;
+	stop = true;
 }
 
 static size_t take_arg(size_t maxval, int allow_zero)
@@ -113,7 +113,7 @@ static size_t take_arg(size_t maxval, int allow_zero)
 
 int main(int argc, char **argv)
 {
-	signal(SIGINT, stop);
+	signal(SIGINT, sigint_handler);
 
 	if ((program_name = *argv) == NULL)
 	{
