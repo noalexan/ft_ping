@@ -8,11 +8,11 @@
 
 struct s_options
 {
-	size_t count;
-	int ttl;
-	bool verbose;
-	size_t timeout;
-	size_t size;
+    size_t count;
+    int ttl;
+    bool verbose;
+    size_t timeout;
+    size_t size;
 };
 
 extern struct s_options g_options;
