@@ -6,13 +6,13 @@
 #define MAXICMPLEN 76
 #define PING_MAX_DATALEN (65535 - MAXIPLEN - MAXICMPLEN)
 
-struct s_options
-{
-    size_t count;
-    int ttl;
-    bool verbose;
-    size_t timeout;
-    size_t size;
+struct s_options {
+	bool verbose;
+	unsigned int count;
+	unsigned int ttl;
+	unsigned int timeout;
+	unsigned int size;
+	unsigned int interval;
 };
 
 extern struct s_options g_options;
