@@ -38,10 +38,8 @@ static struct addrinfo *dns_resolve(const char *hostname)
 
 	int status = getaddrinfo(hostname, NULL, &hints, &host);
 
-	if (status != 0) {
-		fprintf(stderr, "getaddrinfo: %s (%i)\n", gai_strerror(status), status);
-		exit(EXIT_FAILURE);
-	}
+	if (status)
+		return NULL;
 
 	return host;
 }
@@ -100,12 +98,25 @@ void ft_ping(const char *hostname)
 
 	fd_set fdset;
 
-	if (send_buffer == NULL) {
+	if (host == NULL) {
+		fprintf(stderr, "ft_ping: unknown host\n");
+		if (send_buffer)
+			free(send_buffer);
+		if (recv_buffer)
+			free(recv_buffer);
+		exit(EXIT_FAILURE);
+	}
+
+	else if (send_buffer == NULL) {
 		perror("ft_ping: malloc");
+		freeaddrinfo(host);
+		if (recv_buffer)
+			free(recv_buffer);
 		exit(EXIT_FAILURE);
 	}
 
 	else if (recv_buffer == NULL) {
+		freeaddrinfo(host);
 		free(send_buffer);
 		perror("ft_ping: malloc");
 		exit(EXIT_FAILURE);
