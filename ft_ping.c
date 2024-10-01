@@ -45,7 +45,7 @@ static struct addrinfo *dns_resolve(const char *hostname)
 
 static void *create_buffer(size_t packet_size)
 {
-	void *buffer = malloc(packet_size);
+	uint8_t *buffer = malloc(packet_size);
 	struct icmphdr *icmp = (struct icmphdr *)buffer;
 
 	if (buffer == NULL) {
@@ -60,7 +60,7 @@ static void *create_buffer(size_t packet_size)
 	icmp->code = 0;
 
 	for (size_t i = 8; i < packet_size; i++)
-		((unsigned char *)buffer)[i] = rand();
+		buffer[i] = rand();
 
 	return buffer;
 }
@@ -73,8 +73,7 @@ static void send_ping(struct ping_s *ping)
 	icmp->checksum = 0;
 	icmp->checksum = compute_checksum((uint16_t *)ping->buffer, ping->packet_size);
 
-	if (sendto(socket_fd, ping->buffer, ping->packet_size,
-		0, ping->host->ai_addr, ping->host->ai_addrlen) < 0) {
+	if (sendto(socket_fd, ping->buffer, ping->packet_size, 0, ping->host->ai_addr, ping->host->ai_addrlen) < 0) {
 		perror("ft_ping: sending packet");
 		exit(EXIT_FAILURE);
 	}
@@ -82,7 +81,7 @@ static void send_ping(struct ping_s *ping)
 
 void ft_ping(const char *hostname)
 {
-	struct ping_s *ping = calloc(1, sizeof(struct ping_s));
+	struct ping_s ping;
 
 	void *recv_buffer = malloc(0x10000);
 	struct iphdr *recv_ip = (struct iphdr *)recv_buffer;
@@ -93,44 +92,45 @@ void ft_ping(const char *hostname)
 
 	fd_set fdset;
 
-	ping->host = dns_resolve(hostname);
-	ping->packet_size = g_options.size + sizeof(struct icmphdr);
-	ping->buffer = create_buffer(ping->packet_size);
+	bzero(&ping, sizeof(struct ping_s));
+	ping.host = dns_resolve(hostname);
+	ping.packet_size = g_options.size + sizeof(struct icmphdr);
+	ping.buffer = create_buffer(ping.packet_size);
 
-	send_icmp = (struct icmphdr *)ping->buffer;
+	send_icmp = (struct icmphdr *)ping.buffer;
 
-	if (ping->host == NULL) {
+	if (ping.host == NULL) {
 		fprintf(stderr, "ft_ping: unknown host\n");
-		if (ping->buffer)
-			free(ping->buffer);
+		if (ping.buffer)
+			free(ping.buffer);
 		if (recv_buffer)
 			free(recv_buffer);
 		exit(EXIT_FAILURE);
 	}
 
-	else if (ping->buffer == NULL) {
+	else if (ping.buffer == NULL) {
 		perror("ft_ping: malloc");
-		freeaddrinfo(ping->host);
+		freeaddrinfo(ping.host);
 		if (recv_buffer)
 			free(recv_buffer);
 		exit(EXIT_FAILURE);
 	}
 
 	else if (recv_buffer == NULL) {
-		freeaddrinfo(ping->host);
-		free(ping->buffer);
+		freeaddrinfo(ping.host);
+		free(ping.buffer);
 		perror("ft_ping: malloc");
 		exit(EXIT_FAILURE);
 	}
 
-	printf("PING %s (%s): %u data bytes", hostname, inet_ntoa((struct in_addr)((struct sockaddr_in *)ping->host->ai_addr)->sin_addr), g_options.size);
+	printf("PING %s (%s): %u data bytes", hostname, inet_ntoa((struct in_addr)((struct sockaddr_in *)ping.host->ai_addr)->sin_addr), g_options.size);
 	if (g_options.verbose)
 		printf(", id 0x%x = %i", ntohs(send_icmp->un.echo.id), ntohs(send_icmp->un.echo.id));
 	printf("\n");
 
 	gettimeofday(&last, NULL);
-	send_ping(ping);
-	ping->sent_packet++;
+	send_ping(&ping);
+	ping.sent_packet++;
 
 	while (!stop) {
 		FD_ZERO(&fdset);
@@ -170,8 +170,9 @@ void ft_ping(const char *hostname)
 
 			/* Reverse DNS */
 
-			char *ipstr = inet_ntoa((struct in_addr)((struct sockaddr_in *)&client)->sin_addr),
-				 hoststr[NI_MAXHOST], name[NI_MAXHOST + INET_ADDRSTRLEN + 2];
+			char ipstr[INET_ADDRSTRLEN];
+			inet_ntop(AF_INET, (void *)(&((struct sockaddr_in *)&client)->sin_addr), ipstr, 16);
+			char hoststr[NI_MAXHOST], name[NI_MAXHOST + INET_ADDRSTRLEN + 2];
 
 			int res = getnameinfo(&client, sizeof client, hoststr, sizeof hoststr, NULL, 0,
 #ifdef NI_IDN
@@ -233,7 +234,7 @@ void ft_ping(const char *hostname)
 
 			/* Resume Packet */
 
-			ping->received_packet++;
+			ping.received_packet++;
 
 			gettimeofday(&last, NULL);
 
@@ -248,9 +249,9 @@ void ft_ping(const char *hostname)
 		}
 
 		else {
-			if (!g_options.count || ping->sent_packet < g_options.count) {
-				send_ping(ping);
-				ping->sent_packet++;
+			if (!g_options.count || ping.sent_packet < g_options.count) {
+				send_ping(&ping);
+				ping.sent_packet++;
 			}
 
 			else
@@ -262,19 +263,18 @@ void ft_ping(const char *hostname)
 
 	fflush(stdout);
 	printf("--- %s ping statistics ---\n", hostname);
-	printf("%zu packets transmitted, %zu packets received", ping->sent_packet, ping->received_packet);
+	printf("%zu packets transmitted, %zu packets received", ping.sent_packet, ping.received_packet);
 
-	if (ping->sent_packet) {
-		if (ping->received_packet > ping->sent_packet)
+	if (ping.sent_packet) {
+		if (ping.received_packet > ping.sent_packet)
 			printf(", -- somebody is printing forged packets!");
 		else
-			printf(", %d%% packet loss", (int)(((ping->sent_packet - ping->received_packet) * 100) / ping->sent_packet));
+			printf(", %d%% packet loss", (int)(((ping.sent_packet - ping.received_packet) * 100) / ping.sent_packet));
 	}
 
 	printf("\n");
 
-	free(ping->buffer);
+	free(ping.buffer);
 	free(recv_buffer);
-	freeaddrinfo(ping->host);
-	free(ping);
+	freeaddrinfo(ping.host);
 }
