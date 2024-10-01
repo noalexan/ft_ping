@@ -1,3 +1,2 @@
-Broadcast return `ft_ping: sending packet: Permission denied` instead of loop
-Verbose dumps ip hdrs on error
+Timeout feature
 Remove the timeout when count is finished

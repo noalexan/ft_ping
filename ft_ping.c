@@ -79,6 +79,35 @@ static void send_ping(struct ping_s *ping)
 	}
 }
 
+static void ft_packet_dump(const uint8_t *buffer)
+{
+	const struct iphdr *ip = (struct iphdr *)buffer;
+	size_t hlen = ip->ihl << 2;
+	const uint8_t *cp = (uint8_t *)ip + hlen;
+
+	printf("IP Hdr Dump:\n");
+	for (int i = 0; i < 10; i++)
+		printf(" %04x", ((uint16_t *)ip)[i]);
+	printf("\nVr HL TOS  Len   ID Flg  off TTL Pro  cks      Src\tDst\tData\n");
+	printf(" %1x  %1x  %02x", ip->version, ip->ihl, ip->tos);
+	printf(" %04x %04x", (ip->tot_len > 0x2000) ? ntohs(ip->tot_len) : ip->tot_len, ntohs(ip->id));
+	printf("   %1x %04x", (ntohs(ip->frag_off) & 0xe000) >> 13, ntohs(ip->frag_off) & 0x1fff);
+	printf("  %02x  %02x %04x", ip->ttl, ip->protocol, ntohs(ip->check));
+	printf(" %s ", inet_ntoa(*((struct in_addr *)&ip->saddr)));
+	printf(" %s ", inet_ntoa(*((struct in_addr *)&ip->daddr)));
+	while (hlen-- > sizeof(struct iphdr))
+		printf("%02x", *cp++);
+	printf("\n");
+
+	int type = *cp;
+	int code = *(cp + 1);
+
+	printf("ICMP: type %u, code %u, size %lu", type, code, ntohs(ip->tot_len) - hlen);
+	if (type == ICMP_ECHOREPLY || type == ICMP_ECHO)
+		printf(", id 0x%04x, seq 0x%04x", *(cp + 4) * 256 + *(cp + 5), *(cp + 6) * 256 + *(cp + 7));
+	printf("\n");
+}
+
 void ft_ping(const char *hostname)
 {
 	struct ping_s ping;
@@ -206,6 +235,12 @@ void ft_ping(const char *hostname)
 			switch (recv_icmp->type) {
 			case ICMP_ECHOREPLY:
 				break;
+
+			case ICMP_DEST_UNREACH:
+				fprintf(stderr, "%zu bytes from %s: Destination Host Unreachable\n", len - hlen, name);
+				if (g_options.verbose)
+					ft_packet_dump(recv_buffer);
+				continue;
 
 			case ICMP_ECHO:
 				continue;
