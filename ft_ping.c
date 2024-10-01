@@ -82,7 +82,7 @@ static void send_ping(struct ping_s *ping)
 
 void ft_ping(const char *hostname)
 {
-	struct ping_s *ping = malloc(sizeof(struct ping_s));
+	struct ping_s *ping = calloc(1, sizeof(struct ping_s));
 
 	void *recv_buffer = malloc(0x10000);
 	struct iphdr *recv_ip = (struct iphdr *)recv_buffer;
@@ -93,7 +93,6 @@ void ft_ping(const char *hostname)
 
 	fd_set fdset;
 
-	bzero(ping, sizeof(struct ping_s));
 	ping->host = dns_resolve(hostname);
 	ping->packet_size = g_options.size + sizeof(struct icmphdr);
 	ping->buffer = create_buffer(ping->packet_size);

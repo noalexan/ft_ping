@@ -220,6 +220,8 @@ int main(int argc, char **argv)
 	}
 
 	int on = 1;
+	setsockopt(socket_fd, SOL_SOCKET, SO_BROADCAST, &on, sizeof on);
+
 	if (socket_type != 0 &&
 		setsockopt(socket_fd, SOL_SOCKET, socket_type, &on, sizeof on) < 0)
 		perror("ft_ping: setsockopt");
