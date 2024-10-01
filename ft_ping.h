@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
 
 #define MAXIPLEN 60
 #define MAXICMPLEN 76
@@ -13,6 +15,15 @@ struct s_options {
 	unsigned int timeout;
 	unsigned int size;
 	unsigned int interval;
+};
+
+struct ping_s {
+	uint8_t *buffer;
+	struct addrinfo *host;
+	size_t packet_size;
+	size_t sent_packet;
+	size_t received_packet;
+	uint16_t sequence;
 };
 
 extern struct s_options g_options;

@@ -2,7 +2,6 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
 #include <math.h>
 #include <netdb.h>
@@ -60,21 +59,22 @@ static void *create_buffer(size_t packet_size)
 	icmp->un.echo.id = htons(getpid());
 	icmp->code = 0;
 
-	for (size_t i = 8; i < packet_size; i++) ((unsigned char *)buffer)[i] = rand();
+	for (size_t i = 8; i < packet_size; i++)
+		((unsigned char *)buffer)[i] = rand();
 
 	return buffer;
 }
 
-static void send_ping(struct addrinfo *host, void *buffer, size_t packet_size)
+static void send_ping(struct ping_s *ping)
 {
-	struct icmphdr *icmp = (struct icmphdr *)buffer;
-	static uint16_t sequence = 0;
+	struct icmphdr *icmp = (struct icmphdr *)ping->buffer;
 
-	icmp->un.echo.sequence = htons(sequence++);
+	icmp->un.echo.sequence = htons(ping->sequence++);
 	icmp->checksum = 0;
-	icmp->checksum = compute_checksum((uint16_t *)buffer, packet_size);
+	icmp->checksum = compute_checksum((uint16_t *)ping->buffer, ping->packet_size);
 
-	if (sendto(socket_fd, buffer, packet_size, 0, host->ai_addr, host->ai_addrlen) < 0) {
+	if (sendto(socket_fd, ping->buffer, ping->packet_size,
+		0, ping->host->ai_addr, ping->host->ai_addrlen) < 0) {
 		perror("ft_ping: sending packet");
 		exit(EXIT_FAILURE);
 	}
@@ -82,61 +82,77 @@ static void send_ping(struct addrinfo *host, void *buffer, size_t packet_size)
 
 void ft_ping(const char *hostname)
 {
-	struct addrinfo *host = dns_resolve(hostname);
+	struct ping_s *ping = malloc(sizeof(struct ping_s));
 
-	size_t packet_size = g_options.size + sizeof(struct icmphdr);
-
-	void *send_buffer = create_buffer(packet_size);
 	void *recv_buffer = malloc(0x10000);
-
 	struct iphdr *recv_ip = (struct iphdr *)recv_buffer;
-	struct icmphdr *send_icmp = (struct icmphdr *)send_buffer, *recv_icmp;
+	struct icmphdr *send_icmp, *recv_icmp;
 
-	size_t sent_packet = 0, received_packet = 0;
 	struct timeval now, interval = {.tv_sec = 1, .tv_usec = 0}, response_timeout, last;
 	double time = 0, min = INT_MAX, max = INT_MIN, total = 0;
 
 	fd_set fdset;
 
-	if (host == NULL) {
+	bzero(ping, sizeof(struct ping_s));
+	ping->host = dns_resolve(hostname);
+	ping->packet_size = g_options.size + sizeof(struct icmphdr);
+	ping->buffer = create_buffer(ping->packet_size);
+
+	send_icmp = (struct icmphdr *)ping->buffer;
+
+	if (ping->host == NULL) {
 		fprintf(stderr, "ft_ping: unknown host\n");
-		if (send_buffer)
-			free(send_buffer);
+		if (ping->buffer)
+			free(ping->buffer);
 		if (recv_buffer)
 			free(recv_buffer);
 		exit(EXIT_FAILURE);
 	}
 
-	else if (send_buffer == NULL) {
+	else if (ping->buffer == NULL) {
 		perror("ft_ping: malloc");
-		freeaddrinfo(host);
+		freeaddrinfo(ping->host);
 		if (recv_buffer)
 			free(recv_buffer);
 		exit(EXIT_FAILURE);
 	}
 
 	else if (recv_buffer == NULL) {
-		freeaddrinfo(host);
-		free(send_buffer);
+		freeaddrinfo(ping->host);
+		free(ping->buffer);
 		perror("ft_ping: malloc");
 		exit(EXIT_FAILURE);
 	}
 
-	printf("PING %s (%s): %u data bytes", hostname, inet_ntoa((struct in_addr)((struct sockaddr_in *)host->ai_addr)->sin_addr), g_options.size);
+	printf("PING %s (%s): %u data bytes", hostname, inet_ntoa((struct in_addr)((struct sockaddr_in *)ping->host->ai_addr)->sin_addr), g_options.size);
 	if (g_options.verbose)
 		printf(", id 0x%x = %i", ntohs(send_icmp->un.echo.id), ntohs(send_icmp->un.echo.id));
 	printf("\n");
 
 	gettimeofday(&last, NULL);
-	send_ping(host, send_buffer, packet_size);
-	sent_packet++;
+	send_ping(ping);
+	ping->sent_packet++;
 
 	while (!stop) {
 		FD_ZERO(&fdset);
 		FD_SET(socket_fd, &fdset);
 		gettimeofday(&now, NULL);
 
-		response_timeout = interval;
+		response_timeout.tv_usec = last.tv_usec + interval.tv_usec - now.tv_usec;
+		response_timeout.tv_sec = last.tv_sec + interval.tv_sec - now.tv_sec;
+
+		while (response_timeout.tv_usec < 0) {
+			response_timeout.tv_usec += 1000000;
+			response_timeout.tv_sec--;
+		}
+
+		while (response_timeout.tv_usec >= 1000000) {
+			response_timeout.tv_usec -= 1000000;
+			response_timeout.tv_sec++;
+		}
+
+		if (response_timeout.tv_sec < 0)
+			response_timeout.tv_sec = response_timeout.tv_usec = 0;
 
 		int n = select(socket_fd + 1, &fdset, NULL, NULL, &response_timeout);
 
@@ -218,7 +234,7 @@ void ft_ping(const char *hostname)
 
 			/* Resume Packet */
 
-			received_packet++;
+			ping->received_packet++;
 
 			gettimeofday(&last, NULL);
 
@@ -233,9 +249,9 @@ void ft_ping(const char *hostname)
 		}
 
 		else {
-			if (!g_options.count || sent_packet < g_options.count) {
-				send_ping(host, send_buffer, packet_size);
-				sent_packet++;
+			if (!g_options.count || ping->sent_packet < g_options.count) {
+				send_ping(ping);
+				ping->sent_packet++;
 			}
 
 			else
@@ -247,20 +263,19 @@ void ft_ping(const char *hostname)
 
 	fflush(stdout);
 	printf("--- %s ping statistics ---\n", hostname);
-	printf("%zu packets transmitted, %zu packets received", sent_packet, received_packet);
-	// if (ping->ping_num_rept)
-	// 	printf(", +%zu duplicates", ping->ping_num_rept);
+	printf("%zu packets transmitted, %zu packets received", ping->sent_packet, ping->received_packet);
 
-	if (sent_packet) {
-		if (received_packet > sent_packet)
+	if (ping->sent_packet) {
+		if (ping->received_packet > ping->sent_packet)
 			printf(", -- somebody is printing forged packets!");
 		else
-			printf(", %d%% packet loss", (int)(((sent_packet - received_packet) * 100) / sent_packet));
+			printf(", %d%% packet loss", (int)(((ping->sent_packet - ping->received_packet) * 100) / ping->sent_packet));
 	}
 
 	printf("\n");
 
-	free(send_buffer);
+	free(ping->buffer);
 	free(recv_buffer);
-	freeaddrinfo(host);
+	freeaddrinfo(ping->host);
+	free(ping);
 }
