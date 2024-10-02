@@ -230,6 +230,20 @@ int main(int argc, char **argv)
 		setsockopt(socket_fd, IPPROTO_IP, IP_TTL, &g_options.ttl, sizeof g_options.ttl) < 0)
 		perror("ft_ping: setsockopt");
 
+	if (g_options.timeout) {
+		struct sigaction sa;
+		sa.sa_handler = sigint_handler;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0;
+
+		if (sigaction(SIGALRM, &sa, NULL) == -1) {
+			perror("Error setting up signal handler");
+			return 1;
+		}
+
+		alarm(g_options.timeout);
+	}
+
 	while (optind < argc)
 		ft_ping(argv[optind++]);
 
