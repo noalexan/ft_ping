@@ -118,10 +118,10 @@ int main(int argc, char **argv)
 	}
 
 	g_options = (struct s_options){
-		.count = -1,
+		.count = 0,
 		.ttl = 0,
 		.verbose = false,
-		.timeout = -1,
+		.timeout = 0,
 		.size = 56,
 	};
 

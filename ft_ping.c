@@ -166,8 +166,12 @@ void ft_ping(const char *hostname)
 		FD_SET(socket_fd, &fdset);
 		gettimeofday(&now, NULL);
 
-		response_timeout.tv_usec = last.tv_usec + interval.tv_usec - now.tv_usec;
-		response_timeout.tv_sec = last.tv_sec + interval.tv_sec - now.tv_sec;
+		timersub(&now, &last, &response_timeout);
+
+		if (response_timeout.tv_usec >= 100)
+			fprintf(stderr, "- bytes from nowhere: ICMP echo timed out\n");
+
+		timeradd(&response_timeout, &interval, &response_timeout);
 
 		while (response_timeout.tv_usec < 0) {
 			response_timeout.tv_usec += 1000000;
