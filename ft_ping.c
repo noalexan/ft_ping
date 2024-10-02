@@ -110,6 +110,7 @@ static void ft_packet_dump(const uint8_t *buffer)
 
 void ft_ping(const char *hostname)
 {
+	bool finishing = false;
 	struct ping_s ping;
 
 	void *recv_buffer = malloc(0x10000);
@@ -293,8 +294,13 @@ void ft_ping(const char *hostname)
 				ping.sent_packet++;
 			}
 
-			else
+			else if (finishing)
 				break;
+
+			else {
+				interval.tv_sec = 0;
+				finishing = true;
+			}
 
 			gettimeofday(&last, NULL);
 		}
